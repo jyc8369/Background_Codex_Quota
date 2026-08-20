@@ -1,23 +1,23 @@
-# Background_Codex_Quota 개발자 가이드
+# Background_Codex_Quota Developer Guide
 
-## 목표와 지원 범위
+## Goals and supported scope
 
-이 프로젝트는 Codex 쿼터 upstream 응답을 작은 Windows x64 백그라운드
-실행 파일로 변환해 로컬 HTTP API로 제공합니다.
+This project converts the Codex quota upstream response into a small Windows
+x64 background executable and exposes it through a local HTTP API.
 
-주요 설계 목표는 다음과 같습니다.
+The primary design goals are:
 
-- Windows x64 단일 실행 파일
-- 시스템 트레이와 자체 GUI가 없는 headless 프로세스
-- 고정된 JSON 응답 구조
-- 외부 GUI가 HTTP로 상태 확인, 쿼터 조회, 정상 종료 가능
-- 파일 로그 없이 `stderr`만 사용
-- 토큰과 계정 ID를 로그에 노출하지 않음
+- A single Windows x64 executable
+- A headless process with no system tray icon or application window
+- A stable JSON response shape
+- HTTP control for health checks, quota queries, and graceful shutdown
+- Diagnostics written only to `stderr`, with no log files
+- No tokens or account IDs in logs
 
-Stream Deck 플러그인 소스는 이 저장소에 포함되지 않습니다. API 소비자는
-`GET /quota/usage`를 사용하고 숫자를 사용 비율로 해석해야 합니다.
+The Stream Deck plugin source is not included in this repository. API consumers
+must use `GET /quota/usage` and interpret numeric values as percentages used.
 
-## 디렉터리 구조
+## Directory structure
 
 ```text
 Background_Codex_Quota/
@@ -41,31 +41,31 @@ Background_Codex_Quota/
         └── parser.rs
 ```
 
-`target/`은 Cargo 빌드 산출물이며 Git에서 제외합니다. 루트의
-`Background_Codex_Quota.exe`는 실제 배포용 실행 파일입니다.
+`target/` contains Cargo build output and is excluded from Git. The root-level
+`Background_Codex_Quota.exe` is the deployed executable.
 
-## 모듈 책임
+## Module responsibilities
 
-| 모듈 | 책임 |
+| Module | Responsibility |
 | --- | --- |
-| `main` | Windows GUI subsystem 설정과 최상위 오류 처리 |
-| `config` | bind IP와 포트 환경변수 해석 |
-| `auth` | `auth.json` 경로 결정, 토큰과 계정 ID 추출 |
-| `quota::client` | 인증 헤더 구성, upstream 요청, 오류 분류 |
-| `quota::parser` | upstream JSON을 고정된 사용률 응답으로 변환 |
-| `api` | Axum 라우팅, 성공·오류 HTTP 응답 |
-| `control` | 프로세스 종료 신호 공유 |
-| `runtime` | 단일 스레드 Tokio 런타임, 서버 lifecycle, graceful shutdown |
-| `windows` | Windows named mutex를 이용한 중복 실행 방지 |
+| `main` | Configures the Windows GUI subsystem and handles top-level errors. |
+| `config` | Parses bind IP and port environment variables. |
+| `auth` | Resolves `auth.json` and extracts the token and account ID. |
+| `quota::client` | Builds authentication headers, sends upstream requests, and classifies errors. |
+| `quota::parser` | Converts upstream JSON into the stable quota usage response. |
+| `api` | Defines Axum routes and HTTP success and error responses. |
+| `control` | Shares the process shutdown signal. |
+| `runtime` | Owns the single-threaded Tokio runtime, server lifecycle, and graceful shutdown. |
+| `windows` | Prevents duplicate instances through a Windows named mutex. |
 
-## HTTP API 계약
+## HTTP API contract
 
-기본 bind 주소는 `127.0.0.1:8787`입니다.
+The default bind address is `127.0.0.1:8787`.
 
 ### `GET /health`
 
-- 성공 상태: `200 OK`
-- 응답:
+- Success status: `200 OK`
+- Response:
 
 ```json
 {"status":"ok"}
@@ -73,8 +73,8 @@ Background_Codex_Quota/
 
 ### `GET /quota/usage`
 
-- 성공 상태: `200 OK`
-- 응답 구조:
+- Success status: `200 OK`
+- Response shape:
 
 ```json
 {
@@ -84,69 +84,72 @@ Background_Codex_Quota/
 }
 ```
 
-모든 숫자는 남은 비율이 아니라 **사용한 비율**입니다. 각 필드는 정수
-`0..=100` 또는 `null`입니다. 호출할 때마다 upstream을 새로 조회합니다.
+All numeric values represent the percentage **used**, not the percentage
+remaining. Every field is an integer in `0..=100` or `null`. Each request
+performs a fresh upstream query.
 
-기존의 `/quota/remaining` endpoint는 제공하지 않습니다. API 소비자와
-테스트 fixture는 `/quota/usage` 및 사용률 의미에 맞춰야 합니다.
+The legacy `/quota/remaining` endpoint is not available. API consumers and test
+fixtures must use `/quota/usage` and follow its usage-percentage semantics.
 
 ### `POST /control/shutdown`
 
-- 성공 상태: `202 Accepted`
-- 응답:
+- Success status: `202 Accepted`
+- Response:
 
 ```json
 {"status":"shutting_down"}
 ```
 
-응답을 보낸 뒤 공유 종료 신호가 Axum의 graceful shutdown future를 깨우고,
-서버가 listener와 named mutex를 해제합니다.
+After the response is sent, the shared shutdown signal wakes Axum's graceful
+shutdown future. The server then releases its listener and named mutex.
 
-### 오류 매핑
+### Error mapping
 
-| 조건 | HTTP 상태 | 응답 형태 |
+| Condition | HTTP status | Response shape |
 | --- | --- | --- |
-| 인증 파일·토큰 문제 | `401 Unauthorized` | `{"detail":"..."}` |
-| upstream 비성공 HTTP 상태 | `502 Bad Gateway` | upstream 상태와 reason을 포함한 `detail` 객체 |
-| 네트워크·JSON·내부 처리 문제 | `500 Internal Server Error` | `{"detail":"quota request failed"}` |
+| Authentication file or token problem | `401 Unauthorized` | `{"detail":"..."}` |
+| Non-success upstream HTTP status | `502 Bad Gateway` | A `detail` object containing the upstream status and reason |
+| Network, JSON, or internal processing failure | `500 Internal Server Error` | `{"detail":"quota request failed"}` |
 
-내부 오류의 구체적인 내용은 `stderr`에 기록하지만 bearer token과 account ID는
-기록하지 않습니다.
+Detailed internal errors are written to `stderr`. Bearer tokens and account IDs
+must never be logged.
 
-## 설정 계약
+## Configuration contract
 
-| 환경변수 | 기본값 | 규칙 |
+| Environment variable | Default | Rule |
 | --- | --- | --- |
-| `CODEX_QUOTA_HOST` | `127.0.0.1` | 문자열 IP 주소만 허용 |
-| `CODEX_QUOTA_PORT` | `8787` | `1..=65535` |
-| `CODEX_AUTH_JSON` | 없음 | `auth.json` 파일의 명시적 경로 |
-| `CODEX_HOME` | 없음 | 내부의 `auth.json` 사용 |
+| `CODEX_QUOTA_HOST` | `127.0.0.1` | Must be a valid IP address |
+| `CODEX_QUOTA_PORT` | `8787` | Must be in `1..=65535` |
+| `CODEX_AUTH_JSON` | Not set | Explicit path to an `auth.json` file |
+| `CODEX_HOME` | Not set | Uses `auth.json` within this directory |
 
-Auth 경로 우선순위는 다음과 같습니다.
+Authentication paths are resolved in this order:
 
 1. `CODEX_AUTH_JSON`
 2. `CODEX_HOME\auth.json`
 3. `%USERPROFILE%\.codex\auth.json`
 
-`CODEX_AUTH_JSON`과 `CODEX_HOME`의 선행 `~`는 사용자 홈으로 확장합니다.
+Leading `~` components in `CODEX_AUTH_JSON` and `CODEX_HOME` are expanded to
+the user home directory.
 
-지원하는 access token 필드는 다음 순서입니다.
+Access token fields are checked in this order:
 
 1. `tokens.access_token`
 2. `tokens.accessToken`
-3. 최상위 `access_token`
-4. 최상위 `accessToken`
+3. Top-level `access_token`
+4. Top-level `accessToken`
 
-account ID도 동일하게 중첩/최상위 및 snake_case/camelCase 조합을 지원합니다.
-access token은 `Authorization: Bearer ...`, account ID는 존재할 때
-`ChatGPT-Account-Id` 헤더로 전송합니다.
+Account IDs support the same nested or top-level and snake_case or camelCase
+combinations. The access token is sent as `Authorization: Bearer ...`. When
+present, the account ID is sent in the `ChatGPT-Account-Id` header.
 
-## Quota 파서 계약
+## Quota parser contract
 
-upstream URL은 `https://chatgpt.com/backend-api/wham/usage`이며 HTTP timeout은
-20초입니다. 응답 최상위가 JSON 객체가 아니면 내부 처리 오류입니다.
+The upstream URL is `https://chatgpt.com/backend-api/wham/usage`, and the HTTP
+timeout is 20 seconds. A response whose top level is not a JSON object is an
+internal processing error.
 
-필드명은 다음 snake_case와 camelCase를 모두 지원합니다.
+The parser supports both snake_case and camelCase field names:
 
 - `rate_limit` / `rateLimit`
 - `primary_window` / `primaryWindow`
@@ -154,57 +157,56 @@ upstream URL은 `https://chatgpt.com/backend-api/wham/usage`이며 HTTP timeout�
 - `limit_window_seconds` / `limitWindowSeconds`
 - `additional_rate_limits` / `additionalRateLimits`
 
-기본 window 분류 규칙:
+Primary window classification:
 
-| 기간 | 분류 |
+| Duration | Classification |
 | --- | --- |
-| 25일 이상 | `monthly` |
-| 6일 이상 25일 미만 | `weekly` |
-| 6시간 이하 | `hourly` |
-| 그 외 | `custom` |
-| 누락, 0 이하, 유한하지 않은 값 | `unknown` |
+| At least 25 days | `monthly` |
+| At least 6 days but less than 25 days | `weekly` |
+| At most 6 hours | `hourly` |
+| Any other positive finite duration | `custom` |
+| Missing, non-positive, or non-finite | `unknown` |
 
-primary window는 `weekly`와 `monthly`만 API 응답에 채웁니다. `hourly`,
-`custom`, `unknown`은 현재 고정 응답 구조에 노출하지 않습니다.
+Only `weekly` and `monthly` primary windows populate the API response. The
+current stable response does not expose `hourly`, `custom`, or `unknown`.
 
-`additional_rate_limits`에서는 올바른 `used_percent`를 가진 첫 번째 항목을
-`extra`로 사용합니다. 사용률은 Python의 `round`와 맞춘 round-half-even으로
-정수화한 뒤 `0..=100`으로 제한합니다. 예를 들어 `27.5`와 `28.5`는 모두
-`28`입니다.
+For `additional_rate_limits`, the first item containing a valid `used_percent`
+becomes `extra`. Percentages use round-half-even to match Python's `round`, then
+are clamped to `0..=100`. For example, both `27.5` and `28.5` become `28`.
 
-## Runtime과 Windows 동작
+## Runtime and Windows behavior
 
-- named mutex: `Local\Background_Codex_Quota`
-- 두 번째 인스턴스: 오류 없이 즉시 종료
+- Named mutex: `Local\Background_Codex_Quota`
+- Second instance: exits immediately without an error
 - Tokio runtime: `new_current_thread`
-- 종료 방식: HTTP 종료 신호와 Axum graceful shutdown
-- release subsystem: Windows GUI subsystem
-- 로그: 파일 저장 없이 `stderr`
-- tray, 메시지 박스, 자체 제어 창: 없음
+- Shutdown: HTTP shutdown signal and Axum graceful shutdown
+- Release subsystem: Windows GUI subsystem
+- Logging: `stderr` only, with no log files
+- Tray icon, message box, and control window: none
 
-종료 API에는 애플리케이션 수준 인증이 없습니다. loopback 이외 주소에
-바인드하는 배포에서는 Windows 방화벽으로 접근 가능한 출발지와 포트를
-제한해야 합니다.
+The shutdown API has no application-level authentication. Deployments bound to
+an address other than loopback must use Windows Firewall to restrict allowed
+source addresses and ports.
 
-## 의존성과 release 최적화
+## Dependencies and release optimization
 
-주요 런타임 의존성은 Axum, Tokio, Reqwest, Serde, Thiserror,
-`windows-sys`입니다. Reqwest는 native TLS 대신 `rustls-tls`를 사용하고,
-Axum과 Tokio는 필요한 feature만 활성화합니다.
+The main runtime dependencies are Axum, Tokio, Reqwest, Serde, Thiserror, and
+`windows-sys`. Reqwest uses `rustls-tls` instead of native TLS. Axum and Tokio
+enable only the required features.
 
-release profile은 작은 실행 파일을 위해 다음 설정을 사용합니다.
+The release profile uses the following settings to minimize executable size:
 
 - `opt-level = "z"`
-- LTO 활성화
-- codegen unit 1개
-- panic abort
-- symbol strip
+- LTO enabled
+- One codegen unit
+- Abort on panic
+- Symbols stripped
 
-`Cargo.lock`은 재현 가능한 dependency resolve를 위해 커밋합니다.
+`Cargo.lock` is committed to keep dependency resolution reproducible.
 
-## 빌드와 검증
+## Build and verification
 
-모든 Cargo 명령은 지정된 절대 경로를 사용하며 프로젝트 루트에서 실행합니다.
+Run every Cargo command from the project root using the required absolute path:
 
 ```powershell
 & 'C:\code\path\cargo\bin\cargo.exe' fmt --check
@@ -213,34 +215,35 @@ release profile은 작은 실행 파일을 위해 다음 설정을 사용합니�
 & 'C:\code\path\cargo\bin\cargo.exe' build --release
 ```
 
-release 산출물은 `target\release\background_codex_quota.exe`입니다.
+The release artifact is `target\release\background_codex_quota.exe`.
 
-테스트는 최소한 다음 계약을 보호해야 합니다.
+Tests must protect at least these contracts:
 
-- weekly, monthly, extra 파싱
-- 누락, 잘못된 타입, 범위 밖 사용률
-- snake_case와 camelCase
-- round-half-even과 clamp 경계
-- Auth 경로와 지원 필드 우선순위
-- 손상되거나 토큰이 없는 Auth JSON
-- upstream 인증 헤더와 HTTP 상태 매핑
-- `/health`, `/quota/usage`, `/control/shutdown`
-- named mutex 중복 실행과 graceful shutdown
+- Weekly, monthly, and extra parsing
+- Missing values, invalid types, and out-of-range percentages
+- snake_case and camelCase input
+- Round-half-even and clamping boundaries
+- Authentication path and supported field precedence
+- Malformed Auth JSON and Auth JSON without a token
+- Upstream authentication headers and HTTP status mapping
+- `/health`, `/quota/usage`, and `/control/shutdown`
+- Named mutex duplicate detection and graceful shutdown
 
-## 배포 절차
+## Deployment procedure
 
-1. format, Clippy, test, release build를 모두 통과시킵니다.
-2. 기존 프로세스에 `POST /control/shutdown`을 호출합니다.
-3. 프로세스와 포트가 해제되었는지 확인합니다.
-4. `target\release\background_codex_quota.exe`를 루트의
-   `Background_Codex_Quota.exe`로 복사합니다.
-5. 배포 실행 파일을 시작합니다.
-6. `GET /health`가 `200`인지 확인합니다.
-7. fixture 또는 실제 Auth 환경에서 `GET /quota/usage`의 상태와 고정 JSON
-   구조를 확인합니다.
-8. 종료 API 호출 후 프로세스와 포트가 다시 정상적으로 해제되는지 확인합니다.
+1. Pass formatting, Clippy, tests, and the release build.
+2. Call `POST /control/shutdown` on the existing process.
+3. Verify that the process has exited and released its port.
+4. Copy `target\release\background_codex_quota.exe` to the root-level
+   `Background_Codex_Quota.exe`.
+5. Start the deployed executable.
+6. Verify that `GET /health` returns `200`.
+7. With a fixture or real Auth environment, verify the status and stable JSON
+   shape returned by `GET /quota/usage`.
+8. Call the shutdown API and verify again that the process and port are
+   released.
 
-PowerShell smoke test 예시:
+PowerShell smoke test:
 
 ```powershell
 Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health'
@@ -248,11 +251,11 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8787/quota/usage'
 Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8787/control/shutdown'
 ```
 
-## API 변경 시 확인 목록
+## API change checklist
 
-- 성공 JSON 필드 이름과 `null` 가능성을 의도적으로 변경했는가
-- 값의 의미가 사용률인지 남은 비율인지 테스트로 고정했는가
-- 일반 사용자용 `README.md`와 개발자 가이드를 함께 갱신했는가
-- 외부 GUI와 Stream Deck 등 기존 소비자의 endpoint를 확인했는가
-- 종료 endpoint의 네트워크 노출 범위를 검토했는가
-- 인증 정보가 오류 응답이나 로그에 들어가지 않는가
+- Were success-response field names and nullability changed intentionally?
+- Do tests clearly enforce whether values mean used or remaining percentage?
+- Were both the user-facing `README.md` and Developer Guide updated?
+- Were existing consumers, including external GUIs and Stream Deck, checked?
+- Was the shutdown endpoint's network exposure reviewed?
+- Are credentials excluded from error responses and logs?
