@@ -172,6 +172,8 @@ mod tests {
                     weekly: Some(59),
                     monthly: None,
                     extra: Some(83),
+                    hourly: Some(12),
+                    code_review: Some(7),
                 }),
             }),
             Arc::new(ShutdownSignal::default()),
@@ -189,7 +191,13 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(
             serde_json::from_slice::<Value>(&body).unwrap(),
-            serde_json::json!({"weekly":59,"monthly":null,"extra":83})
+            serde_json::json!({
+                "weekly": 59,
+                "monthly": null,
+                "extra": 83,
+                "hourly": 12,
+                "code_review": 7
+            })
         );
     }
 

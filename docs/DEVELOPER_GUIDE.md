@@ -80,13 +80,16 @@ The default bind address is `127.0.0.1:8787`.
 {
   "weekly": 28,
   "monthly": null,
-  "extra": 17
+  "extra": 17,
+  "hourly": 12,
+  "code_review": null
 }
 ```
 
 All numeric values represent the percentage **used**, not the percentage
 remaining. Every field is an integer in `0..=100` or `null`. Each request
-performs a fresh upstream query.
+performs a fresh upstream query. `extra` remains reserved for the first valid
+item in `additional_rate_limits`.
 
 The legacy `/quota/remaining` endpoint is not available. API consumers and test
 fixtures must use `/quota/usage` and follow its usage-percentage semantics.
@@ -153,9 +156,11 @@ The parser supports both snake_case and camelCase field names:
 
 - `rate_limit` / `rateLimit`
 - `primary_window` / `primaryWindow`
+- `secondary_window` / `secondaryWindow`
 - `used_percent` / `usedPercent`
 - `limit_window_seconds` / `limitWindowSeconds`
 - `additional_rate_limits` / `additionalRateLimits`
+- `code_review_rate_limit` / `codeReviewRateLimit`
 
 Primary window classification:
 
@@ -167,12 +172,18 @@ Primary window classification:
 | Any other positive finite duration | `custom` |
 | Missing, non-positive, or non-finite | `unknown` |
 
-Only `weekly` and `monthly` primary windows populate the API response. The
-current stable response does not expose `hourly`, `custom`, or `unknown`.
+Primary and secondary windows are evaluated in that order. The first window
+matching each period populates the corresponding field, so primary wins when
+both windows have the same classification. `weekly`, `monthly`, and `hourly`
+are exposed; `custom` and `unknown` remain internal classifications.
 
 For `additional_rate_limits`, the first item containing a valid `used_percent`
 becomes `extra`. Percentages use round-half-even to match Python's `round`, then
 are clamped to `0..=100`. For example, both `27.5` and `28.5` become `28`.
+
+`code_review_rate_limit` is parsed separately into `code_review`. Its primary
+window is preferred, with its secondary window as fallback. It is not merged
+into `extra`.
 
 ## Runtime and Windows behavior
 
@@ -219,7 +230,8 @@ The release artifact is `target\release\background_codex_quota.exe`.
 
 Tests must protect at least these contracts:
 
-- Weekly, monthly, and extra parsing
+- Weekly, monthly, hourly, extra, and code review parsing
+- Primary and secondary window precedence
 - Missing values, invalid types, and out-of-range percentages
 - snake_case and camelCase input
 - Round-half-even and clamping boundaries

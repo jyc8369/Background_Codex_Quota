@@ -113,7 +113,9 @@ Example response:
 {
   "weekly": 28,
   "monthly": null,
-  "extra": 17
+  "extra": 17,
+  "hourly": 12,
+  "code_review": null
 }
 ```
 
@@ -122,10 +124,13 @@ Each number is a percentage already used, from `0` through `100`.
 - `weekly`: usage of the primary weekly quota
 - `monthly`: usage of the primary monthly quota
 - `extra`: usage of the first additional limit
+- `hourly`: usage of the hourly quota window
+- `code_review`: usage of the code review quota window
 - `null`: the corresponding limit is not present in the current response
 
-Only the applicable `weekly` or `monthly` primary field may be populated. Each
-request fetches fresh upstream data, so there is no separate refresh endpoint.
+The service checks primary and secondary upstream windows. When both windows
+match the same period, the primary window takes precedence. Each request fetches
+fresh upstream data, so there is no separate refresh endpoint.
 
 ### Graceful shutdown
 
