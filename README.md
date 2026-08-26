@@ -121,8 +121,8 @@ Example response:
 
 Each number is a percentage already used, from `0` through `100`.
 
-- `weekly`: usage of the primary weekly quota
-- `monthly`: usage of the primary monthly quota
+- `weekly`: usage of the weekly quota window
+- `monthly`: usage of the monthly quota window
 - `extra`: usage of the first additional limit
 - `hourly`: usage of the hourly quota window
 - `code_review`: usage of the code review quota window

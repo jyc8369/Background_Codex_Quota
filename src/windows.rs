@@ -50,3 +50,28 @@ mod platform {
 }
 
 pub use platform::WindowsSingleInstance;
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::WindowsSingleInstance;
+
+    #[test]
+    fn rejects_duplicate_instance_until_first_handle_is_dropped() {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let name = format!(
+            r"Local\Background_Codex_Quota_test_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+
+        let first = WindowsSingleInstance::acquire(&name)
+            .unwrap()
+            .expect("first instance should acquire the mutex");
+        assert!(WindowsSingleInstance::acquire(&name).unwrap().is_none());
+
+        drop(first);
+        assert!(WindowsSingleInstance::acquire(&name).unwrap().is_some());
+    }
+}

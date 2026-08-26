@@ -118,7 +118,8 @@ fn get_extra(root: &Map<String, Value>) -> Option<i64> {
 }
 
 fn get_object<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Map<String, Value>> {
-    get_value(object, keys)?.as_object()
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_object))
 }
 
 fn get_value<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
@@ -126,7 +127,8 @@ fn get_value<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Va
 }
 
 fn get_number(object: &Map<String, Value>, keys: &[&str]) -> Option<f64> {
-    get_value(object, keys)?.as_f64()
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_f64))
 }
 
 fn normalize_percent(used_percent: f64) -> i64 {
@@ -211,6 +213,22 @@ mod tests {
         assert_eq!(result.hourly, Some(9));
         assert_eq!(result.weekly, Some(77));
         assert_eq!(result.code_review, Some(33));
+    }
+
+    #[test]
+    fn falls_back_to_valid_alias_when_preferred_alias_is_invalid() {
+        let result = parse_quota(&json!({
+            "rate_limit": null,
+            "rateLimit": {
+                "primary_window": {
+                    "used_percent": null,
+                    "usedPercent": 42,
+                    "limit_window_seconds": null,
+                    "limitWindowSeconds": 604800
+                }
+            }
+        }));
+        assert_eq!(result.weekly, Some(42));
     }
 
     #[test]

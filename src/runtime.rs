@@ -64,3 +64,37 @@ async fn run_async() -> Result<(), RuntimeError> {
         .await
         .map_err(|error| RuntimeError::Server(error.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use tokio::net::TcpListener;
+
+    use super::ShutdownSignal;
+
+    #[tokio::test]
+    async fn graceful_shutdown_releases_http_listener() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let signal = Arc::new(ShutdownSignal::default());
+        let provider = Arc::new(crate::quota::client::QuotaClient::new().unwrap());
+        let router = crate::api::router(provider, Arc::clone(&signal));
+        let server_signal = Arc::clone(&signal);
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move { server_signal.wait().await })
+                .await
+                .unwrap();
+        });
+
+        signal.request();
+        tokio::time::timeout(Duration::from_secs(1), server)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let rebound = TcpListener::bind(address).await.unwrap();
+        drop(rebound);
+    }
+}

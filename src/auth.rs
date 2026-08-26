@@ -164,6 +164,31 @@ mod tests {
     }
 
     #[test]
+    fn reports_missing_invalid_and_unreadable_auth_files() {
+        let missing = temp_path("not-found");
+        assert!(matches!(
+            load_codex_auth(Some(&missing)),
+            Err(AuthLoadError::NotFound(_))
+        ));
+
+        let invalid = temp_path("invalid-json");
+        fs::write(&invalid, b"{").unwrap();
+        assert!(matches!(
+            load_codex_auth(Some(&invalid)),
+            Err(AuthLoadError::InvalidJson(_))
+        ));
+        fs::remove_file(invalid).unwrap();
+
+        let directory = temp_path("directory");
+        fs::create_dir(&directory).unwrap();
+        assert!(matches!(
+            load_codex_auth(Some(&directory)),
+            Err(AuthLoadError::Read(_))
+        ));
+        fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
     fn resolves_auth_paths_in_documented_order() {
         let explicit = temp_path("explicit");
         let codex_home = std::env::temp_dir().join(format!(

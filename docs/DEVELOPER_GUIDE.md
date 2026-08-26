@@ -162,7 +162,7 @@ The parser supports both snake_case and camelCase field names:
 - `additional_rate_limits` / `additionalRateLimits`
 - `code_review_rate_limit` / `codeReviewRateLimit`
 
-Primary window classification:
+Window classification:
 
 | Duration | Classification |
 | --- | --- |
